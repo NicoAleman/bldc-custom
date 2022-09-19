@@ -113,7 +113,7 @@ static float pid_value;
 static float setpoint, setpoint_target, setpoint_target_interpolated;
 static float noseangling_interpolated;
 static float torquetilt_filtered_current, torquetilt_target, torquetilt_interpolated;
-static float torquetilt_strength_ratio, torquetilt_adjusted_strength;
+static float torquetilt_speed_ratio, torquetilt_strength_ratio, torquetilt_adjusted_strength;
 static Biquad torquetilt_current_biquad;
 static float turntilt_target, turntilt_interpolated;
 static SetpointAdjustmentType setpointAdjustmentType;
@@ -254,7 +254,7 @@ void app_balance_configure(balance_config *conf, imu_config *conf2) {
 			bump_correction_intensity = balance_conf.yaw_current_clamp;
 
 		correction_sustain_duration = fmaxf(50, balance_conf.roll_steer_erpm_kp);
-		balance_bump_beep = (balance_conf.roll_steer_kp == 0);
+		balance_bump_beep = 1;
 	}
 
 	// Variable nose angle adjustment / tiltback (setting is per 1000erpm, convert to per erpm)
@@ -561,6 +561,14 @@ static void apply_torquetilt(void){
 		step_size = torquetilt_off_step_size;
 	}else{
 		step_size = torquetilt_on_step_size;
+
+		// Apply TorqueTilt Speed proportion for Regen (nose lower) Tilt
+		if (SIGN(torquetilt_filtered_current) == -1) {
+			torquetilt_speed_ratio = balance_conf.roll_steer_kp;
+			step_size = torquetilt_on_step_size * torquetilt_speed_ratio;
+		} else {
+			step_size = torquetilt_on_step_size;
+		}
 	}
 
 	if(fabsf(torquetilt_target - torquetilt_interpolated) < step_size){
