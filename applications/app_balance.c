@@ -113,6 +113,7 @@ static float pid_value;
 static float setpoint, setpoint_target, setpoint_target_interpolated;
 static float noseangling_interpolated;
 static float torquetilt_filtered_current, torquetilt_target, torquetilt_interpolated;
+static float torquetilt_strength_ratio, torquetilt_adjusted_strength;
 static Biquad torquetilt_current_biquad;
 static float turntilt_target, turntilt_interpolated;
 static SetpointAdjustmentType setpointAdjustmentType;
@@ -534,13 +535,26 @@ static void apply_torquetilt(void){
 	}else{
 		torquetilt_filtered_current  = motor_current;
 	}
+	
+	// Apply appropriate strength proportion depending on sign of current
+	if (SIGN(torquetilt_filtered_current) == -1) {
+		torquetilt_strength_ratio = balance_conf.yaw_kd;
+	} else {
+		torquetilt_strength_ratio = balance_conf.yaw_ki;
+	}
 
+	if (torquetilt_strength_ratio > 1)
+		torquetilt_strength_ratio = 1;
+	if (torquetilt_strength_ratio < 0)
+		torquetilt_strength_ratio = 0;
+
+	torquetilt_adjusted_strength = balance_conf.torquetilt_strength * torquetilt_strength_ratio;
 
 	// Wat is this line O_o
 	// Take abs motor current, subtract start offset, and take the max of that with 0 to get the current above our start threshold (absolute).
 	// Then multiply it by "power" to get our desired angle, and min with the limit to respect boundaries.
 	// Finally multiply it by sign motor current to get directionality back
-	torquetilt_target = fminf(fmaxf((fabsf(torquetilt_filtered_current) - balance_conf.torquetilt_start_current), 0) * balance_conf.torquetilt_strength, balance_conf.torquetilt_angle_limit) * SIGN(torquetilt_filtered_current);
+	torquetilt_target = fminf(fmaxf((fabsf(torquetilt_filtered_current) - balance_conf.torquetilt_start_current), 0) * torquetilt_adjusted_strength, balance_conf.torquetilt_angle_limit) * SIGN(torquetilt_filtered_current);
 
 	float step_size;
 	if((torquetilt_interpolated - torquetilt_target > 0 && torquetilt_target > 0) || (torquetilt_interpolated - torquetilt_target < 0 && torquetilt_target < 0)){
