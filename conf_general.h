@@ -186,6 +186,9 @@
 //#define HW_SOURCE "hw_ubox_single.c"
 //#define HW_HEADER "hw_ubox_single.h"
 
+//#define HW_SOURCE "hw_ubox_100_single.c"
+//#define HW_HEADER "hw_ubox_100_single.h"
+
 //#define HW_SOURCE "hw_60v2_alva.c"
 //#define HW_HEADER "hw_60v2_alva.h"
 #endif
