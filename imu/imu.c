@@ -50,7 +50,9 @@ static systime_t init_time;
 static bool imu_ready;
 static Biquad acc_x_biquad, acc_y_biquad, acc_z_biquad;
 
-float accel_lowpass_filter = 0;
+float accel_lowpass_filter_x = 0;
+float accel_lowpass_filter_y = 0;
+float accel_lowpass_filter_z = 0;
 
 // Private functions
 static void imu_read_callback(float *accel, float *gyro, float *mag);
@@ -117,10 +119,18 @@ void imu_init(imu_config *set) {
 	}
 
 	// Acc biquad filter
-	if(accel_lowpass_filter > 0){
-		float fc = accel_lowpass_filter / m_settings.sample_rate_hz;
+	if(accel_lowpass_filter_x > 0){
+		float fc = accel_lowpass_filter_x / m_settings.sample_rate_hz;
 		biquad_config(&acc_x_biquad, BQ_LOWPASS, fc);
+	}
+
+	if(accel_lowpass_filter_y > 0){
+		float fc = accel_lowpass_filter_y / m_settings.sample_rate_hz;
 		biquad_config(&acc_y_biquad, BQ_LOWPASS, fc);
+	}
+
+	if(accel_lowpass_filter_z > 0){
+		float fc = accel_lowpass_filter_z / m_settings.sample_rate_hz;
 		biquad_config(&acc_z_biquad, BQ_LOWPASS, fc);
 	}
 }
@@ -507,9 +517,15 @@ static void imu_read_callback(float *accel, float *gyro, float *mag) {
 	gyro_rad[2] = DEG2RAD_f(m_gyro[2]);
 
 	// Apply filters
-	if(accel_lowpass_filter > 0){ // Acc biquad filter
+	if(accel_lowpass_filter_x > 0){ // Acc x biquad filter
 		m_accel[0] = biquad_process(&acc_x_biquad, m_accel[0]);
+	}
+
+	if(accel_lowpass_filter_y > 0){ // Acc y biquad filter
 		m_accel[1] = biquad_process(&acc_y_biquad, m_accel[1]);
+	}
+
+	if(accel_lowpass_filter_z > 0){ // Acc z biquad filter
 		m_accel[2] = biquad_process(&acc_z_biquad, m_accel[2]);
 	}
 

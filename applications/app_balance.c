@@ -37,7 +37,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#define FW_REVISION 61
+#define FW_REVISION 62
 
 // Data type (Value 5 was removed, and can be reused at a later date, but i wanted to preserve the current value's numbers for UIs)
 typedef enum {
