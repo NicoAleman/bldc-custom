@@ -434,7 +434,7 @@ float app_balance_get_pid_output(void) {
 	return pid_value;
 }
 float app_balance_get_pitch_angle(void) {
-	return pitch_angle;
+	return true_pitch_angle;
 }
 float app_balance_get_roll_angle(void) {
 	return roll_angle;
