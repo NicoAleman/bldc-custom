@@ -1518,12 +1518,15 @@ static THD_FUNCTION(balance_thread, arg) {
 				// True Booster, based on true angle
 				float true_proportional = setpoint - true_pitch_angle;
 				float abs_proportional = fabsf(true_proportional);
-				float boost_angle = braking ? booster_angle_brk : booster_angle_acc;
+
+				// determine accel vs. brake boost; accounts for reverse + dark ride
+				bool tail_down = (true_proportional < 0 && erpm > 0) || (true_proportional > 0 && erpm < 0);
+				float boost_angle = tail_down ? booster_angle_brk : booster_angle_acc;
 
 				if(abs_proportional > boost_angle){
 					float boost_ramp = booster_ramp_acc;
 					float boost_current = booster_current_acc;
-					if (braking) {
+					if (tail_down) {
 						boost_ramp = booster_ramp_brk;
 						boost_current = booster_current_brk;
 					}
