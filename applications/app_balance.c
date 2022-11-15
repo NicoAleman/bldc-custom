@@ -87,7 +87,7 @@ static systime_t loop_time;
 static float startup_step_size;
 static float tiltback_duty_step_size, tiltback_hv_step_size, tiltback_lv_step_size, tiltback_return_step_size;
 static float torquetilt_on_step_size, torquetilt_off_step_size, turntilt_step_size;
-static float tiltback_variable, tiltback_variable_max_erpm, noseangling_step_size;
+static float tiltback_variable, tiltback_variable_max_erpm, noseangling_step_size, inputtilt_step_size;
 static float angular_rate_kp;
 static float mc_max_temp_fet;
 static float mc_max_temp_mot;
@@ -139,7 +139,7 @@ static float proportional, integral;
 static float last_proportional, abs_proportional;
 static float pid_value;
 static float setpoint, setpoint_target, setpoint_target_interpolated;
-static float noseangling_interpolated;
+static float noseangling_interpolated, inputtilt_interpolated;
 static float torquetilt_filtered_current, torquetilt_target, torquetilt_interpolated;
 static Biquad torquetilt_current_biquad;
 static float braketilt_factor, braketilt_target, braketilt_interpolated, brakestep_modifier;
@@ -203,6 +203,7 @@ void app_balance_configure(balance_config *conf, imu_config *conf2) {
 	torquetilt_off_step_size = balance_conf.torquetilt_off_speed / balance_conf.hertz;
 	turntilt_step_size = balance_conf.turntilt_speed / balance_conf.hertz;
 	noseangling_step_size = balance_conf.noseangling_speed / balance_conf.hertz;
+	inputtilt_step_size = fminf(100, fabsf(balance_conf.roll_steer_erpm_kp)) / balance_conf.hertz; // Limit to 100°/s
 
 	mc_max_temp_fet = mc_interface_get_configuration()->l_temp_fet_start - 3;
 	mc_max_temp_mot = mc_interface_get_configuration()->l_temp_motor_start - 3;
@@ -477,6 +478,7 @@ static void reset_vars(void){
 	setpoint_target_interpolated = pitch_angle;
 	setpoint_target = 0;
 	noseangling_interpolated = 0;
+	inputtilt_interpolated = 0;
 	torquetilt_target = 0;
 	torquetilt_interpolated = 0;
 	torquetilt_filtered_current = 0;
@@ -930,7 +932,8 @@ static void calculate_setpoint_interpolated(void){
 
 static void apply_noseangling(void){
 	if (state != RUNNING_WHEELSLIP) {
-		// Nose angle adjustment, add variable then constant tiltback
+		// Nose angle adjustment, add variable then constant tiltback ///////////////////
+
 		float noseangling_target = 0;
 		if (fabsf(erpm) > tiltback_variable_max_erpm) {
 			noseangling_target = fabsf(balance_conf.tiltback_variable_max) * SIGN(erpm);
@@ -951,8 +954,38 @@ static void apply_noseangling(void){
 		}else{
 			noseangling_interpolated -= noseangling_step_size;
 		}
+
+		// INPUT TILTBACK (UART Remote Based) ///////////////////////////////////////////
+
+		float input_tiltback_max = fabsf(balance_conf.roll_steer_kp);
+		float input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max;
+		balance_inputtilt = input_tiltback_target;
+
+		// Input Tilt defaults to Inverted Throttle (Reverse Throttle = Nose Lift)
+		// Setting tiltback max as negative inverts this back to standard (Reverse Throttle = Nose Drop)
+		if (input_tiltback_max < 0) {
+			input_tiltback_target *= -1;
+		}
+
+		// Default Behavior: Nose Tilt only while moving, invert to match direction of travel
+		// Alternate Behavior (Negative Tilt Speed): Nose Tilt at any speed, does not invert for reverse
+		if (balance_conf.roll_steer_erpm_kp >= 0) {
+			if (erpm <= -200){
+				input_tiltback_target *= -1;
+			} else if (erpm < 200){
+				input_tiltback_target = 0;
+			}
+		}
+
+		if (fabsf(input_tiltback_target - inputtilt_interpolated) < inputtilt_step_size){
+			inputtilt_interpolated = input_tiltback_target;
+		} else if (input_tiltback_target - inputtilt_interpolated > 0){
+			inputtilt_interpolated += inputtilt_step_size;
+		} else {
+			inputtilt_interpolated -= inputtilt_step_size;
+		}
 	}
-	setpoint += noseangling_interpolated;
+	setpoint += noseangling_interpolated + inputtilt_interpolated;
 }
 
 static float expected_acc;
