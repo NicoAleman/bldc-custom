@@ -127,11 +127,9 @@ void app_set_configuration(app_configuration *conf) {
 		break;
 
 	case APP_BALANCE:
+		hw_stop_i2c();
 		app_balance_start();
-		if(appconf.imu_conf.type == IMU_TYPE_INTERNAL){
-			hw_stop_i2c();
-			app_uartcomm_start(UART_PORT_COMM_HEADER);
-		}
+		app_uartcomm_start(UART_PORT_COMM_HEADER);
 		break;
 
 	case APP_PAS:

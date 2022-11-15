@@ -22,7 +22,7 @@
 
 #include "conf_general.h"
 
-#define ATR_CUSTOM_VERSION 122
+#define ATR_CUSTOM_VERSION 2410
 
 // Functions
 const app_configuration* app_get_configuration(void);
@@ -62,6 +62,7 @@ void app_nunchuk_start(void);
 void app_nunchuk_stop(void);
 void app_nunchuk_configure(chuk_config *conf);
 float app_nunchuk_get_decoded_chuk(void);
+float app_nunchuk_get_out_val(void);
 void app_nunchuk_update_output(chuck_data *data);
 
 void app_balance_start(void);

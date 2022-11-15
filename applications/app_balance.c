@@ -455,7 +455,7 @@ uint16_t app_balance_get_switch_state(void) {
 	return switch_state;
 }
 float app_balance_get_adc1(void) {
-	return adc1;
+	return app_nunchuk_get_out_val();
 }
 float app_balance_get_adc2(void) {
 	return adc2;
