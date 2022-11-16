@@ -957,15 +957,11 @@ static void apply_noseangling(void){
 
 		// INPUT TILTBACK (UART Remote Based) ///////////////////////////////////////////
 
-		float input_tiltback_max = fabsf(balance_conf.roll_steer_kp);
-		float input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max;
-		balance_inputtilt = input_tiltback_target;
-
 		// Input Tilt defaults to Inverted Throttle (Reverse Throttle = Nose Lift)
 		// Setting tiltback max as negative inverts this back to standard (Reverse Throttle = Nose Drop)
-		if (input_tiltback_max < 0) {
-			input_tiltback_target *= -1;
-		}
+		float input_tiltback_max = balance_conf.roll_steer_kp;
+		float input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max;
+		balance_inputtilt = input_tiltback_target;
 
 		// Default Behavior: Nose Tilt only while moving, invert to match direction of travel
 		// Alternate Behavior (Negative Tilt Speed): Nose Tilt at any speed, does not invert for reverse
