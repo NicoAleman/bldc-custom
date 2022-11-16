@@ -932,8 +932,7 @@ static void calculate_setpoint_interpolated(void){
 
 static void apply_noseangling(void){
 	if (state != RUNNING_WHEELSLIP) {
-		// Nose angle adjustment, add variable then constant tiltback ///////////////////
-
+		// Nose angle adjustment, add variable then constant tiltback
 		float noseangling_target = 0;
 		if (fabsf(erpm) > tiltback_variable_max_erpm) {
 			noseangling_target = fabsf(balance_conf.tiltback_variable_max) * SIGN(erpm);
@@ -954,25 +953,30 @@ static void apply_noseangling(void){
 		}else{
 			noseangling_interpolated -= noseangling_step_size;
 		}
+	}
+	setpoint += noseangling_interpolated;
+}
 
-		// INPUT TILTBACK (UART Remote Based) ///////////////////////////////////////////
+static void apply_inputtilt(void){ // Input Tiltback (UART Remote Based)
+	// Input Tilt defaults to Inverted Throttle (Reverse Throttle = Nose Lift)
+	// Setting tiltback max as negative inverts this back to standard (Reverse Throttle = Nose Drop)
+	float input_tiltback_max = balance_conf.roll_steer_kp;
+	float input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max;
+	balance_inputtilt = input_tiltback_target;
 
-		// Input Tilt defaults to Inverted Throttle (Reverse Throttle = Nose Lift)
-		// Setting tiltback max as negative inverts this back to standard (Reverse Throttle = Nose Drop)
-		float input_tiltback_max = balance_conf.roll_steer_kp;
-		float input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max;
-		balance_inputtilt = input_tiltback_target;
-
-		// Default Behavior: Nose Tilt only while moving, invert to match direction of travel
-		// Alternate Behavior (Negative Tilt Speed): Nose Tilt at any speed, does not invert for reverse
-		if (balance_conf.roll_steer_erpm_kp >= 0) {
-			if (erpm <= -200){
-				input_tiltback_target *= -1;
-			} else if (erpm < 200){
-				input_tiltback_target = 0;
-			}
+	// Default Behavior: Nose Tilt at any speed, does not invert for reverse (Safer for slow climbs/descents & jumps)
+	// Alternate Behavior (Negative Tilt Speed): Nose Tilt only while moving, invert to match direction of travel
+	if (balance_conf.roll_steer_erpm_kp < 0) {
+		if (state == RUNNING_WHEELSLIP) {     // During wheelslip, setpoint drifts back to level for ERPM-based Input Tilt
+			inputtilt_interpolated *= 0.995;  // to prevent chain reaction between setpoint and motor direction
+		} else if (erpm <= -200){
+			input_tiltback_target *= -1; // Invert angles for reverse
+		} else if (erpm < 200){
+			input_tiltback_target = 0; // Disable Input Tiltback at standstill to mitigate oscillations
 		}
+	}
 
+	if (balance_conf.roll_steer_erpm_kp >= 0 || state != RUNNING_WHEELSLIP) { // Pause and gradually decrease ERPM-based Input Tilt during wheelslip
 		if (fabsf(input_tiltback_target - inputtilt_interpolated) < inputtilt_step_size){
 			inputtilt_interpolated = input_tiltback_target;
 		} else if (input_tiltback_target - inputtilt_interpolated > 0){
@@ -981,7 +985,8 @@ static void apply_noseangling(void){
 			inputtilt_interpolated -= inputtilt_step_size;
 		}
 	}
-	setpoint += noseangling_interpolated + inputtilt_interpolated;
+
+	setpoint += inputtilt_interpolated;
 }
 
 static float expected_acc;
@@ -1482,6 +1487,7 @@ static THD_FUNCTION(balance_thread, arg) {
 				setpoint = setpoint_target_interpolated;
 				if (!is_upside_down) {
 					apply_noseangling();
+					apply_inputtilt();
 					apply_torquetilt();
 					apply_turntilt();
 				}
