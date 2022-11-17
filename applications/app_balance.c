@@ -1042,7 +1042,6 @@ static void apply_torquetilt(void){
 		else {
 			if (ST2MS(current_time - wheelslip_end_timer) < 100) {
 				// for 100ms after wheelslip we still don't do ATR to allow the wheel to decelerate
-				if (balance_conf.yaw_current_clamp > 1) beep_alert(1, 0);
 				torquetilt_interpolated *= 0.998;
 				torquetilt_target *= 0.999;
 				braketilt_interpolated *= 0.998;
@@ -1051,15 +1050,12 @@ static void apply_torquetilt(void){
 				return;
 			}
 			else if ((fabsf(acceleration) > 10) && (abs_erpm > 1000)) {
-				if (balance_conf.yaw_current_clamp > 0) {
-					if (balance_conf.yaw_current_clamp > 1) beep_alert(1, 0);
-					torquetilt_interpolated *= 0.998;
-					torquetilt_target *= 0.999;
-					braketilt_interpolated *= 0.998;
-					braketilt_target *= 0.999;
-					setpoint += torquetilt_interpolated + braketilt_interpolated;
-					return;
-				}
+				torquetilt_interpolated *= 0.998;
+				torquetilt_target *= 0.999;
+				braketilt_interpolated *= 0.998;
+				braketilt_target *= 0.999;
+				setpoint += torquetilt_interpolated + braketilt_interpolated;
+				return;
 			}
 		}
 
