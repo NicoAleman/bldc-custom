@@ -961,7 +961,12 @@ static void apply_inputtilt(void){ // Input Tiltback (UART Remote Based)
 	// Input Tilt defaults to Inverted Throttle (Reverse Throttle = Nose Lift)
 	// Setting tiltback max as negative inverts this back to standard (Reverse Throttle = Nose Drop)
 	float input_tiltback_max = balance_conf.roll_steer_kp;
-	float input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max;
+	float input_tiltback_target;
+	switch ((int) balance_conf.yaw_current_clamp) {
+		case 1: input_tiltback_target = -app_nunchuk_get_out_val() * input_tiltback_max; break; // UART Remote
+		case 2: input_tiltback_target = -app_ppm_get_servo_val() * input_tiltback_max; break; // PPM Remote
+		default: input_tiltback_target = 0; break; // Input Tiltback Disabled
+	}
 	balance_inputtilt = input_tiltback_target;
 
 	// Default Behavior: Nose Tilt at any speed, does not invert for reverse (Safer for slow climbs/descents & jumps)

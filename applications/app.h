@@ -22,7 +22,7 @@
 
 #include "conf_general.h"
 
-#define ATR_CUSTOM_VERSION 2410
+#define ATR_CUSTOM_VERSION 2411
 
 // Functions
 const app_configuration* app_get_configuration(void);
@@ -36,6 +36,7 @@ bool app_is_running(void);
 void app_ppm_start(void);
 void app_ppm_stop(void);
 float app_ppm_get_decoded_level(void);
+float app_ppm_get_servo_val(void);
 void app_ppm_configure(ppm_config *conf);
 
 void app_adc_start(bool use_rx_tx);

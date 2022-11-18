@@ -49,6 +49,7 @@ static volatile ppm_config config;
 static volatile int pulses_without_power = 0;
 static float input_val = 0.0;
 static volatile float direction_hyst = 0;
+static volatile float ppm_servo_val;
 
 // Private functions
 
@@ -83,6 +84,10 @@ void app_ppm_stop(void) {
 
 float app_ppm_get_decoded_level(void) {
 	return input_val;
+}
+
+float app_ppm_get_servo_val(void) {
+	return ppm_servo_val;
 }
 
 static void servodec_func(void) {
@@ -141,6 +146,13 @@ static THD_FUNCTION(ppm_thread, arg) {
 			}
 			input_val = servo_val;
 			break;
+		}
+
+		if (config.ctrl_type == PPM_CTRL_TYPE_NONE) {
+			utils_deadband(&servo_val, config.hyst, 1.0);
+			servo_val = utils_throttle_curve(servo_val, config.throttle_exp, config.throttle_exp_brake, config.throttle_exp_mode);
+			ppm_servo_val = servo_val;
+			continue;
 		}
 
 		// All pins and buttons are still decoded for debugging, even
