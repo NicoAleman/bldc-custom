@@ -84,6 +84,7 @@ static thread_t *app_thread;
 static volatile balance_config balance_conf;
 static volatile imu_config imu_conf;
 static systime_t loop_time;
+static unsigned int start_counter_clicks, start_counter_clicks_max, start_click_current;
 static float startup_step_size;
 static float tiltback_duty_step_size, tiltback_hv_step_size, tiltback_lv_step_size, tiltback_return_step_size;
 static float torquetilt_on_step_size, torquetilt_off_step_size, turntilt_step_size;
@@ -115,7 +116,8 @@ static SwitchState switch_state;
 static float rtkp, rtki, rti_limit, rtd_limit;
 static float og_tt_target;
 static float og_tt_strength;
-static float tt_pid_intensity, tt_speedboost_intensity, tt_strength_uphill;
+static float tt_speedboost_intensity, tt_strength_uphill;
+static float tt_response_boost, tt_release_boost;
 static float integral_tt_impact_uphill, integral_tt_impact_downhill;
 static float acceleration, last_erpm;
 static float accel_gap;
@@ -136,7 +138,7 @@ static float turntilt_strength;
 // Rumtime state values
 static BalanceState state;
 static float proportional, integral;
-static float last_proportional, abs_proportional;
+static float last_proportional;
 static float pid_value;
 static float setpoint, setpoint_target, setpoint_target_interpolated;
 static float noseangling_interpolated, inputtilt_interpolated;
@@ -204,6 +206,12 @@ void app_balance_configure(balance_config *conf, imu_config *conf2) {
 	turntilt_step_size = balance_conf.turntilt_speed / balance_conf.hertz;
 	noseangling_step_size = balance_conf.noseangling_speed / balance_conf.hertz;
 	inputtilt_step_size = fminf(100, fabsf(balance_conf.roll_steer_erpm_kp)) / balance_conf.hertz; // Limit to 100°/s
+
+	// Feature: Stealthy start vs normal start (noticeable click when engaging) - 0-20A
+	int bc = balance_conf.brake_current;
+	start_click_current = (balance_conf.brake_current - bc) * 100;
+	start_click_current = fminf(start_click_current, 40) / 2;
+	start_counter_clicks_max = 3;
 
 	mc_max_temp_fet = mc_interface_get_configuration()->l_temp_fet_start - 3;
 	mc_max_temp_mot = mc_interface_get_configuration()->l_temp_motor_start - 3;
@@ -343,9 +351,16 @@ void app_balance_configure(balance_config *conf, imu_config *conf2) {
 		og_tt_strength = app_get_configuration()->app_nrf_conf.address[2] / 100;
 	}
 
+	// Boost in TT strength above 3000 erpm
 	int ttstart = balance_conf.torquetilt_start_current;
 	tt_speedboost_intensity = balance_conf.torquetilt_start_current - ttstart;
 	tt_speedboost_intensity = fminf(0.5, tt_speedboost_intensity); // 50% is more than enough!
+
+	// Torquetilt response time boosts, one for speed, and another for quick release on ATR reversal
+	int tton = balance_conf.torquetilt_on_speed;
+	int ttoff = balance_conf.torquetilt_off_speed;
+	tt_response_boost = fminf(2, 1 + (balance_conf.torquetilt_on_speed - tton));
+	tt_release_boost = 1 + (balance_conf.torquetilt_off_speed - ttoff) * 10;
 
 	// Torque-Tilt strength is different for up vs downhills
 	tt_strength_uphill = balance_conf.torquetilt_strength * 10;
@@ -511,6 +526,9 @@ static void reset_vars(void){
 	// Turntilt:
 	last_yaw_angle = 0;
 	yaw_aggregate = 0;
+
+	// Feature: click on start
+	start_counter_clicks = start_counter_clicks_max;
 }
 
 static float get_setpoint_adjustment_step_size(void){
@@ -1106,7 +1124,6 @@ static void apply_torquetilt(void){
 
 		// now torquetilt target is purely based on gap between expected and actual acceleration
 		float new_ttt = torquetilt_strength * accel_gap;
-
 		if (!braking && (abs_erpm > 250))  {
 			float og_tt_angle_limit = 3;
 			float og_tt_start_current = 15;
@@ -1144,27 +1161,35 @@ static void apply_torquetilt(void){
 		torquetilt_target = fminf(torquetilt_target, balance_conf.torquetilt_angle_limit);
 		torquetilt_target = fmaxf(torquetilt_target, -balance_conf.torquetilt_angle_limit);
 
+		float response_boost = 1;
+		if (abs_erpm > 2500) {
+			response_boost = tt_response_boost;
+		}
+		if (abs_erpm > 6000) {
+			response_boost *= tt_response_boost;
+		}
+
 		// Key to keeping the board level and consistent is to determine the appropriate step size!
 		// We want to react quickly to changes, but we don't want to overreact to glitches in acceleration data
 		// or trigger oscillations...
+		const float TT_BOOST_MARGIN = 2;
 		if (forward) {
 			if (torquetilt_interpolated < 0) {
 				// downhill
 				if (torquetilt_interpolated < torquetilt_target) {
 					// to avoid oscillations we go down slower than we go up
 					step_size = torquetilt_off_step_size;
+					if ((torquetilt_target > 0)
+						&& ((torquetilt_target - torquetilt_interpolated) > TT_BOOST_MARGIN)
+						&& (abs_erpm > 2000))
+					{
+						// boost the speed if tilt target has reversed (and if there's a significant margin)
+						step_size = torquetilt_off_step_size * tt_release_boost;
+					}
 				}
 				else {
 					// torquetilt is increasing
-					if (braking) {
-						// braking downhill, do it only half as aggressively as pushing uphill
-						// a little short taildrag is acceptable
-						step_size = torquetilt_on_step_size;
-					}
-					else {
-						// we arent braking yet there's reverse torquetilt? How does this happen??
-						step_size = torquetilt_on_step_size;
-					}
+					step_size = torquetilt_on_step_size * response_boost;
 				}
 			}
 			else {
@@ -1175,7 +1200,7 @@ static void apply_torquetilt(void){
 					step_size = torquetilt_off_step_size;
 				}else{
 					// standard case of increasing torquetilt
-					step_size = torquetilt_on_step_size;
+					step_size = torquetilt_on_step_size * response_boost;
 				}
 			}
 		}
@@ -1185,18 +1210,16 @@ static void apply_torquetilt(void){
 				if (torquetilt_interpolated > torquetilt_target) {
 					// to avoid oscillations we go down slower than we go up
 					step_size = torquetilt_off_step_size;
+					if ((torquetilt_target < 0)
+						&& ((torquetilt_interpolated - torquetilt_target) > TT_BOOST_MARGIN)
+						&& (abs_erpm > 2000)) {
+						// boost the speed if tilt target has reversed (and if there's a significant margin)
+						step_size = torquetilt_off_step_size * tt_release_boost;
+					}
 				}
 				else {
 					// torquetilt is increasing
-					if (braking) {
-						// braking downhill, do it only half as aggressively as pushing uphill
-						// a little short taildrag is acceptable
-						step_size = torquetilt_on_step_size;
-					}
-					else {
-						// we arent braking yet there's reverse torquetilt? Probably impossible
-						step_size = torquetilt_on_step_size;
-					}
+					step_size = torquetilt_on_step_size * response_boost;
 				}
 			}
 			else {
@@ -1206,7 +1229,7 @@ static void apply_torquetilt(void){
 					step_size = torquetilt_off_step_size;
 				}else{
 					// standard case of increasing torquetilt
-					step_size = torquetilt_on_step_size;
+					step_size = torquetilt_on_step_size * response_boost;
 				}
 			}
 		}
@@ -1225,6 +1248,7 @@ static void apply_torquetilt(void){
 		torquetilt_interpolated -= step_size;
 	}
 
+	// brake tilt
 	step_size = torquetilt_off_step_size / brakestep_modifier;
 	if(fabsf(braketilt_target) > fabsf(braketilt_interpolated)) {
 		step_size = torquetilt_on_step_size * 1.5;
@@ -1551,50 +1575,54 @@ static THD_FUNCTION(balance_thread, arg) {
 
 				last_proportional = proportional;
 
-				// True Booster, based on true angle
-				float true_proportional = setpoint - true_pitch_angle;
-				float abs_proportional = fabsf(true_proportional);
+				// Start booster and angularP portion a few cycles later, after the start clicks have been emitted
+				// this keeps the start smooth and predictable
+				if (start_counter_clicks == 0) {
+					// True Booster, based on true angle
+					float true_proportional = setpoint - true_pitch_angle;
+					float abs_proportional = fabsf(true_proportional);
 
-				// determine accel vs. brake boost (inverted accel/brake boost in reverse for smooth transition for now)
-				bool tail_down = (true_proportional < 0);
-				float boost_angle = tail_down ? booster_angle_brk : booster_angle_acc;
+					// determine accel vs. brake boost (inverted accel/brake boost in reverse for smooth transition for now)
+					bool tail_down = (true_proportional < 0);
+					float boost_angle = tail_down ? booster_angle_brk : booster_angle_acc;
 
-				if(abs_proportional > boost_angle){
-					float boost_ramp = booster_ramp_acc;
-					float boost_current = booster_current_acc;
-					if (tail_down) {
-						boost_ramp = booster_ramp_brk;
-						boost_current = booster_current_brk;
+					if(abs_proportional > boost_angle){
+						float boost_ramp = booster_ramp_acc;
+						float boost_current = booster_current_acc;
+						if (tail_down) {
+							boost_ramp = booster_ramp_brk;
+							boost_current = booster_current_brk;
+						}
+						if(abs_proportional - boost_angle < boost_ramp){
+							pid_booster = boost_current * SIGN(true_proportional) * (abs_proportional - boost_angle);
+						}else{
+							pid_booster = boost_current * SIGN(true_proportional) * boost_ramp;
+						}
 					}
-					if(abs_proportional - boost_angle < boost_ramp){
-						pid_booster = boost_current * SIGN(true_proportional) * (abs_proportional - boost_angle);
-					}else{
-						pid_booster = boost_current * SIGN(true_proportional) * boost_ramp;
-					}
-				}
-				new_pid_value += pid_booster;
+					new_pid_value += pid_booster;
 
-				// Add angular rate to pid_value:
-				float gyro[3];
-				imu_get_gyro(gyro);
+					// Add angular rate to pid_value:
+					float gyro[3];
+					imu_get_gyro(gyro);
 
-				pid_angular_rate = -gyro[1] * angular_rate_kp;
-				if (is_upside_down) {
-					pid_angular_rate = -pid_angular_rate;
-				}
-				
-				// Optimized implementation of Angular Rate P:
-				if (rtd_limit > 0) {
-					// Allow high dampening, limit reinforcing
-					if (SIGN(pid_angular_rate) == SIGN(pid_prop)) {
-						// reinforce proportional at half the intensity only
-						pid_angular_rate /= 2;
-						pid_angular_rate = SIGN(pid_angular_rate) *
-							fminf(rtd_limit / 3, fabsf(pid_angular_rate));
+					pid_angular_rate = -gyro[1] * angular_rate_kp;
+					if (is_upside_down) {
+						pid_angular_rate = -pid_angular_rate;
 					}
-					else {
-						pid_angular_rate = SIGN(pid_angular_rate) *
-							fminf(rtd_limit, fabsf(pid_angular_rate));
+
+					// Optimized implementation of Angular Rate P:
+					if (rtd_limit > 0) {
+						// Allow high dampening, limit reinforcing
+						if (SIGN(pid_angular_rate) == SIGN(pid_prop)) {
+							// reinforce proportional at half the intensity only
+							pid_angular_rate /= 2;
+							pid_angular_rate = SIGN(pid_angular_rate) *
+								fminf(rtd_limit / 3, fabsf(pid_angular_rate));
+						}
+						else {
+							pid_angular_rate = SIGN(pid_angular_rate) *
+								fminf(rtd_limit, fabsf(pid_angular_rate));
+						}
 					}
 				}
 
@@ -1646,7 +1674,18 @@ static THD_FUNCTION(balance_thread, arg) {
 				}
 
 				// Output to motor
-				set_current(pid_value);
+				if (start_counter_clicks) {
+					// Generate alternate pulses to produce distinct "click"
+					start_counter_clicks--;
+					if ((start_counter_clicks & 0x1) == 0)
+						set_current(pid_value - start_click_current);
+					else
+						set_current(pid_value + start_click_current);
+				}
+				else {
+					set_current(pid_value);
+				}
+
 				break;
 			case (FAULT_ANGLE_PITCH):
 			case (FAULT_ANGLE_ROLL):
