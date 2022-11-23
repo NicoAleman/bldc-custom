@@ -180,7 +180,7 @@ static bool use_reverse_stop, runtime_reverse_stop;
 static float pid_brake_increment;
 
 // Log values
-float balance_setpoint, balance_atr, balance_carve, balance_true_pitch;
+float balance_setpoint, balance_inputtilt, balance_atr, balance_carve, balance_true_pitch;
 int log_balance_state; // not static so we can log it
 
 // Function Prototypes
