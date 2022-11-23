@@ -22,7 +22,7 @@
 
 #include "conf_general.h"
 
-#define ATR_CUSTOM_VERSION 122
+#define ATR_CUSTOM_VERSION 2403
 
 // Functions
 const app_configuration* app_get_configuration(void);
